@@ -1,5 +1,6 @@
 
 import random
+random.seed(94444)
     
 REWARD_TRASH = 1.
 REWARD_WALLCOLLISION = -.5
@@ -76,6 +77,24 @@ class State:
         else:
             assert False
 
+    # Returns a doubles vector of the state with fixed size
+    # [robot_x, robot_y, dim_x, dim_y, num_trash, trash_0_x, trash_0_y, trash_1_x, trash_1_y, ..., trash_n_x, trash_n_y]
+    # If trash is picked up, vector is replaced with -1s
+    def return_state_vector(self):
+        state_vector = []
+        state_vector.append(self.robot_pos[0])
+        state_vector.append(self.robot_pos[1])
+        state_vector.append(self.dim_x)
+        state_vector.append(self.dim_y)
+        state_vector.append(self.num_trash)
+        for self.trash_pos in self.trash_positions:
+            state_vector.append(self.trash_pos[0])
+            state_vector.append(self.trash_pos[1])
+        for i in range(0, self.num_trash - len(self.trash_positions)):
+            state_vector.append(-1)
+            state_vector.append(-1)
+        return state_vector
+
     def print_grid(self):
         print("\t  ", end="")
         for x in range(0, self.dim_x):
@@ -104,6 +123,7 @@ class State:
         print(self.dim_x, "by", self.dim_y)
         print("Robot at", self.robot_pos)
         print(self.num_trash, "pieces of trash at", self.trash_positions)
+        print("State vector:", self.return_state_vector(), "\n")
         self.print_grid()
 
 
