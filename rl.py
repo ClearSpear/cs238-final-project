@@ -1,9 +1,12 @@
 ''' Reinforcement learning
 
 '''
+from copy import deepcopy
+from itertools import product
 import sys
 import time
 
+from matplotlib import pyplot as plt
 import numpy as np 
 import pandas as pd 
 
@@ -12,42 +15,56 @@ import roomba_sim
 class QLearning:
     ''' Q-learning algorithm 
     '''
-    def __init__(self, discount=0.5, learning_rate=0.5, bRandom=False):
+    def __init__(self, discount=0.5, learning_rate=0.5, num_iter=1000, iter_length=10000):
         ''' CLass init
             :param discount: discount factor
             :param learning_rate: learning rate for updating qvalues
         '''
         self.discount = discount
         self.learning_rate = learning_rate
-        self.bRandom = bRandom
-        
+        self.num_iter = num_iter
+        self.iter_length = iter_length
+
         self.n_states = -1
         # Map from action --> actionIndex
         self.n_actions = -1
         # Matrix from (stateIndex, actionIndex) --> qvalue
         self.qMap = None
-        # RewardMap from state,action pair
-        self.rMap = {}
-        # Full reward map (state, action, next_state) --> reward
-        self.rMapFull = {}
-
-        self.rewardMap = {}
-
         np.random.seed(13)
 
-    def init(self, df):
+    def positionToState(self, waterWorld):
+        """ Map from waterWorld positions to state number
+        """
+        if len(waterWorld.trash_positions) == 0:
+            return -1
+        x, y = waterWorld.robot_pos
+        trash_positions_current = dict.fromkeys(waterWorld.trash_positions, True)
+
+        trash_index_key = tuple([1 if pos in trash_positions_current else 0 for pos in self.original_trash_positions])
+        trash_index = self.trash_pos_map[trash_index_key]
+
+        state_int = trash_index*self.dim_xy + (x + y*self.dim_y)
+        return state_int
+
+    def init(self, waterWorld):
         ''' Init state/action and qvalues based on input dataframe!
         '''
-        self.n_states = df['s'].max()
-        self.n_actions = df['a'].max()
+        self.dim_x = waterWorld.dim_x
+        self.dim_y = waterWorld.dim_y
+        self.dim_xy = self.dim_x * self.dim_y
+        self.num_trash = waterWorld.num_trash
 
+        self.n_states = self.dim_x * self.dim_y * (2**(self.num_trash))
+
+        self.original_trash_positions = deepcopy(waterWorld.trash_positions)
+        self.trash_pos_map = {}
+        i = 0
+        for c in product(*[range(2) for _ in range(len(self.original_trash_positions))]):
+            self.trash_pos_map[c] = i
+            i+=1
+
+        self.n_actions = 4
         self.qMap = np.zeros((self.n_states, self.n_actions))
-
-        rCountTotalMap = df.groupby(['s', 'a'])['r'].count().to_dict()
-        rCount = df.groupby(['s', 'a', 'sp'])['r'].count()
-        
-        self.rewardMap = df[['s', 'a', 'sp', 'r']].drop_duplicates().set_index(['s', 'a', 'sp']).to_dict()
-
 
     def update(self, s, a, r, sp):
         ''' Update Q-values based on 
@@ -56,81 +73,59 @@ class QLearning:
             :param r: output reward for s->a
             :param sp: output state for s->a
         '''
-        #Q[s,a]+=α*(r+γ*maximum(Q[s′,:])-Q[s,a])
-        stateIndex = s-1
-        actionIndex = a-1
-        qVal = self.qMap[stateIndex, actionIndex]
-        nextStateIndex = sp-1
+        qVal = self.qMap[s, a]
         
-        if not self.bRandom:
-            # Select best next policy
-            delta = self.learning_rate * (r + self.discount*np.max(self.qMap[nextStateIndex, :]) - qVal)
-        else:
-            # Select random next action instead of best one!
-            delta = self.learning_rate * (r + self.discount*np.random.choice(self.qMap[nextStateIndex, :]) - qVal)
-        
-        self.qMap[stateIndex, actionIndex] += delta
-        self.rMap[(s, a)] = max(self.rMap.get((s, a), -np.inf), r)
+        delta = self.learning_rate * (r + self.discount*np.max(self.qMap[sp, :]) - qVal)
+        self.qMap[s, a] += delta
+
+    def selectAction(self, s):
+        """ Select best action based on current qvalues with tie breaker
+        """
+        qVals = self.qMap[s, :]
+        best_action = np.random.choice(np.flatnonzero(qVals == qVals.max()))
+        return best_action
 
 
-    def learn(self, df):
+    def train(self, waterWorld):
         ''' Start Q-learning algorithm 
-            :param: df
         '''
-        self.init(df)
+        self.init(waterWorld)
+        
+        rewards = []
+        for i in range(self.num_iter):
+            epReward = self.runEpisode(waterWorld)
+            waterWorld.refresh()
+            rewards.append(epReward)
+            print (f"Reward for {i} iteration: {epReward:.4f}")
+        plt.plot(rewards)
+        plt.show()
 
-        for index, row in df.iterrows():
-            s = row['s']
-            a = row['a']
-            r = row['r']
-            sp = row['sp']
-            self.update(s, a, r, sp)
-
-    def runEpisode(self, startState):
+    def runEpisode(self, waterWorld):
         """ Perform one episode from input start state
         """
-        pass
 
-
-    def train(self, df, n_eps=1000):
-        ''' Start Q-learning algorithm 
-            :param: df
-        '''
-        self.init(df)
-        for _ in range(n_eps):
-            startState = np.random.randint(self.n_states) + 1
-
-
-    def getPolicy(self):
-        ''' Return policy from internal qMap
-        '''
-        policy = np.argmax(self.qMap, axis=1) + 1
-        return policy
-
-    def getTotalQvalue(self):
-        ''' Return current total qvalue
-        '''
-        avg_rewards = self.qMap.max(axis=1).mean()
-        return avg_rewards
-
-    def getTotalRewards(self, policy):
-        reward = 0
-        for state, action in enumerate(policy):
-            state += 1
-            reward += self.rMap[(state, action)]
-        return reward
+        discounted_rewards = 0
+        for i in range(self.iter_length):
+            state = self.positionToState(waterWorld)
+            if state == -1:
+                print (f"Found all trash in {i} steps with rewards: {discounted_rewards:4f}")
+                break
+            action = self.selectAction(state)
+            reward = waterWorld.do_action(action)
+            nextState = self.positionToState(waterWorld)
+            self.update(state, action, reward, nextState)
+            discounted_rewards = 1*discounted_rewards + reward #discount?
+        return discounted_rewards
 
 def main():
     dim_x = 5
     dim_y = 5
-    trash_num = 2
+    trash_num = 3
 
     env = roomba_sim.State(dim_x, dim_y, trash_num)
     # Init policy
-    for _ in range(1000):
-        pass
-        # get optimal action/reward from policy & next state
-        # state.print_grid()
+    model = QLearning()
+    model.train(env)
 
 if __name__ == "__main__":
     main() 
