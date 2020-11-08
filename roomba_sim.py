@@ -2,10 +2,12 @@
 import random
 random.seed(94444)
     
-REWARD_TRASH = 1.
-REWARD_WALLCOLLISION = -.5
+REWARD_TRASH = 10
+REWARD_WALLCOLLISION = -5
 REWARD_MOVE = -.1
-REWARD_TIMEOUT = -100
+REWARD_TIMEOUT = 0
+
+BATTERY_LIFE = 100
 
 class State:
 
@@ -203,4 +205,3 @@ def main():
 
 if __name__ == "__main__":
     main() 
-
