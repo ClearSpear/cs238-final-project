@@ -12,41 +12,44 @@ import roomba_sim
 
 TRAIN_ITER = 100
 
-TEST_BOARDS = "test_boards_water"
+TEST_BOARDS = "test_boards"
 
 def TestRoomba(qMap, board_count=100, bPrint=False):
-    total_rewards = 0
 
+    rewards = []
     for index in range(board_count):
         print (f"Testing board: {index}")
         board_path = os.path.join(TEST_BOARDS, f"board{index}.pkl")
         env = None
         with open(board_path, 'rb') as fb:
             env = pickle.load(fb)
+        num_trash = env.num_trash
         
         # Init policy
         model = QLearning(num_iter=1, iter_length=roomba_sim.BATTERY_LIFE)
         model.test(env, qMap, bPrint=bPrint)
-        reward = model.total_rewards # scale rewards on total number of trash!
-        total_rewards += reward
+        reward = model.total_rewards/num_trash # scale rewards on total number of trash!
+        rewards.append(reward)
 
-    mean_rewards = total_rewards / board_count
-
-    print (f"avg_rewards for test: {mean_rewards}\n")
-    return mean_rewards
+    print (f"avg_rewards for test QLearning: {np.mean(rewards)}\n")
+    print (f"std for test QLearning: {np.std(rewards)}\n")
+    return rewards
 
 
 def TestRandomRoomba(board_count=100, bPrint=False):
-    total_rewards = 0
+
     policy = roomba_sim.Policy()
 
+    rewards = []
     for index in range(board_count):
         board_path = os.path.join(TEST_BOARDS, f"board{index}.pkl")
         env = None
         with open(board_path, 'rb') as fb:
             env = pickle.load(fb)
-        
+        num_trash = env.num_trash
+
         # Init policy
+        board_reward = 0
         for i in range(roomba_sim.BATTERY_LIFE):
             action = policy.get_action(env)
             reward = env.do_action(action)
@@ -58,12 +61,12 @@ def TestRandomRoomba(board_count=100, bPrint=False):
             if i==(roomba_sim.BATTERY_LIFE - 1):
                 reward = roomba_sim.REWARD_TIMEOUT
 
-            total_rewards += reward
+            board_reward += reward
+        rewards.append(board_reward/num_trash)
 
-    mean_rewards = total_rewards / board_count
-
-    print (f"avg_rewards for test: {mean_rewards}\n")
-    return mean_rewards
+    print (f"avg_rewards for test Random: {np.mean(rewards)}\n")
+    print (f"std for test Random: {np.std(rewards)}\n")
+    return rewards
 
 
 def TrainRoomba(dim_x, dim_y, max_trash_count, board_count=10000, test_index=100, test_boards=100, learning_decay_index=1000):
@@ -71,8 +74,11 @@ def TrainRoomba(dim_x, dim_y, max_trash_count, board_count=10000, test_index=100
     """
     qMap = None
 
-    overall_rewards = []
-    random_rewards = []
+    overall_rewards__mean = []
+    overall_rewards__std = []
+    random_rewards__mean = []
+    random_rewards__std = []
+
     np.random.seed(13)
     #random_seeds = list(range(board_count))
     #np.random.shuffle(random_seeds)
@@ -85,6 +91,8 @@ def TrainRoomba(dim_x, dim_y, max_trash_count, board_count=10000, test_index=100
         #np.random.seed(random_seeds[index])
         trash_num = np.random.randint(low=1, high=max_trash_count)
         move_prob = np.random.uniform(low=0.5, high=1)
+        if TEST_BOARDS == "test_boards":
+            move_prob = 1 
 
         env = roomba_sim.State(dim_x, dim_y, trash_num, move_prob=move_prob)
         # Init policy
@@ -96,10 +104,12 @@ def TrainRoomba(dim_x, dim_y, max_trash_count, board_count=10000, test_index=100
 
         if (index+1)%test_index == 0:
             rewards = TestRoomba(qMap, board_count=test_boards)
-            overall_rewards.append(rewards)
+            overall_rewards__mean.append(np.mean(rewards))
+            overall_rewards__std.append(np.std(rewards))
 
             rewards = TestRandomRoomba(board_count=test_boards)
-            random_rewards.append(rewards)
+            random_rewards__mean.append(np.mean(rewards))
+            random_rewards__std.append(np.std(rewards))
 
         if (index+1) % learning_decay_index == 0:
             learning_rate = discount * learning_rate
@@ -107,20 +117,34 @@ def TrainRoomba(dim_x, dim_y, max_trash_count, board_count=10000, test_index=100
     
     # Final test
     rewards = TestRoomba(qMap, board_count=test_boards)
-    overall_rewards.append(rewards)
+    overall_rewards__mean.append(np.mean(rewards))
+    overall_rewards__std.append(np.std(rewards))
+
     rewards = TestRandomRoomba(board_count=test_boards)
-    random_rewards.append(rewards)
+    random_rewards__mean.append(np.mean(rewards))
+    random_rewards__std.append(np.std(rewards))
+
+    plt.plot(np.arange(0, len(overall_rewards__mean))*test_index, overall_rewards__mean, label='Q-Learning Policy')
+    plt.plot(np.arange(0, len(random_rewards__mean))*test_index, random_rewards__mean, label='Random Policy')
+    plt.xlabel("Training Iteration Number", fontsize=16)
+    plt.ylabel("Rewards", fontsize=16)
+    plt.title("Average rewards over 100 test cases", fontsize=18)
+    plt.legend(fontsize=14)
+    plt.grid()
+    plt.show()
+
+    plt.plot(np.arange(0, len(overall_rewards__std))*test_index, overall_rewards__std, label='Q-Learning Policy')
+    plt.plot(np.arange(0, len(random_rewards__std))*test_index, random_rewards__std, label='Random Policy')
+    plt.xlabel("Training Iteration Number", fontsize=16)
+    plt.ylabel("Rewards", fontsize=16)
+    plt.title("Standard deviation of rewards over 100 test cases", fontsize=18)
+    plt.legend(fontsize=14)
+    plt.grid()
+    plt.show()
 
     # Display board...
     rewards = TestRoomba(qMap, board_count=5, bPrint=True)
 
-
-    plt.plot(np.arange(0, len(overall_rewards))*test_index, overall_rewards, label='Q-Learning Rewards')
-    plt.plot(np.arange(0, len(random_rewards))*test_index, random_rewards, label='Random Rewards')
-    plt.xlabel("# Training Iteration")
-    plt.ylabel("Average Rewards")
-    plt.legend()
-    plt.show()
 
 def main():
     DIM_X = 5
