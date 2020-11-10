@@ -3,6 +3,7 @@ import pickle
 import time
 
 import numpy as np
+import pandas as pd
 
 from matplotlib import pyplot as plt
 
@@ -12,10 +13,15 @@ import roomba_sim
 
 TRAIN_ITER = 100
 
-TEST_BOARDS = "test_boards"
+TEST_BOARDS = "test_boards_water_large"
+
+finalTestMap = {
+    'random': {},
+    'qlearn': {},
+}
 
 def TestRoomba(qMap, board_count=100, bPrint=False):
-
+    global finalTestMap
     rewards = []
     for index in range(board_count):
         print (f"Testing board: {index}")
@@ -31,6 +37,12 @@ def TestRoomba(qMap, board_count=100, bPrint=False):
         reward = model.total_rewards/num_trash # scale rewards on total number of trash!
         rewards.append(reward)
 
+        currentMoveRewards = finalTestMap['qlearn'].get(env.move_prob, [])
+        currentMoveRewards.append(reward)
+        #print (currentMoveRewards)
+        finalTestMap['qlearn'][env.move_prob]  = currentMoveRewards
+        #print (finalTestMap['qlearn'][env.move_prob])
+
     print (f"avg_rewards for test QLearning: {np.mean(rewards)}\n")
     print (f"std for test QLearning: {np.std(rewards)}\n")
     return rewards
@@ -39,7 +51,7 @@ def TestRoomba(qMap, board_count=100, bPrint=False):
 def TestRandomRoomba(board_count=100, bPrint=False):
 
     policy = roomba_sim.Policy()
-
+    global finalTestMap
     rewards = []
     for index in range(board_count):
         board_path = os.path.join(TEST_BOARDS, f"board{index}.pkl")
@@ -62,7 +74,13 @@ def TestRandomRoomba(board_count=100, bPrint=False):
                 reward = roomba_sim.REWARD_TIMEOUT
 
             board_reward += reward
-        rewards.append(board_reward/num_trash)
+        board_reward = board_reward/num_trash
+        
+        currentMoveRewards = finalTestMap['random'].get(env.move_prob, [])
+        currentMoveRewards.append(board_reward)
+        finalTestMap['random'][env.move_prob]  = currentMoveRewards
+        
+        rewards.append(board_reward)
 
     print (f"avg_rewards for test Random: {np.mean(rewards)}\n")
     print (f"std for test Random: {np.std(rewards)}\n")
@@ -143,7 +161,7 @@ def TrainRoomba(dim_x, dim_y, max_trash_count, board_count=10000, test_index=100
     plt.show()
 
     # Display board...
-    rewards = TestRoomba(qMap, board_count=5, bPrint=True)
+    #rewards = TestRoomba(qMap, board_count=5, bPrint=True)
 
 
 def main():
@@ -151,9 +169,41 @@ def main():
     DIM_Y = 5
     DIM_XY = DIM_X * DIM_Y
     MAX_TRASH_COUNT = 7
-
-    TrainRoomba(DIM_X, DIM_Y, MAX_TRASH_COUNT, board_count=10000, test_index=10, learning_decay_index=1000000)
+    global finalTestMap
+    test_index = 10000000000
+    TrainRoomba(
+        DIM_X, 
+        DIM_Y, 
+        MAX_TRASH_COUNT, 
+        board_count=10000, 
+        test_boards=1000,
+        test_index=test_index, 
+        learning_decay_index=1000000
+        )
     
+    if TEST_BOARDS == 'test_boards_water_large':
+        
+        moveProbs = sorted(finalTestMap['random'].keys())
+        dfs = []
+        for move_prob in moveProbs:
+            df = pd.DataFrame({
+                'qlearn': finalTestMap['qlearn'][move_prob],
+                'random': finalTestMap['random'][move_prob]
+                })
+            df.loc[:, 'move_prob'] = f"{move_prob:.2f}"
+            dfs.append(df)
+        dfs = pd.concat(dfs, axis=0)
+
+        
+        #plt.plot(moveProbs, qrewards, label='Q-Learning Policy')
+        #plt.plot(moveProbs, rrewards, label='Random Policy')
+        dfs.boxplot(column='qlearn', by='move_prob', fontsize=16)
+        plt.xlabel("Roomba Move Probability", fontsize=16)
+        plt.ylabel("Reward", fontsize=16)
+        plt.title(f"Boxplot of final scaled reward for Roombas with different move probabilities.", fontsize=18)
+        plt.legend(fontsize=14)
+        plt.grid()
+        plt.show()
 
 if __name__ == "__main__":
     main() 
